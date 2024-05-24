@@ -1,0 +1,590 @@
+---
+title: "TD5-Econometris-BONNEAU"
+author: "Nathan BONNEAU"
+date: "2023-12-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Part 1 : Warm up - data settings unit root tests
+
+## Exercise 1 : Data settings 
+###  1) Data importation 
+
+Chargons notre fichier CSV dans R
+
+```{r cars}
+library(readxl)
+data <- read_excel("C:/Users/natha/Desktop/unenployement.xls")
+head(data)
+```
+
+### 2) Check the status of the imported data and transform it, what do you observe ? what type of seasonal pattern is ? What type of the filters do you propose to clean ?
+
+On remarque des amplitudes plutôt égales au début de la serie et répétitives, il semble donc avoir un pattern saisonnier en amplitudes additives. Cependant en 2020, il y a un gros changement de trends, on peut essayer d'appliquer un filtre en différence au début pour éliminer cette caractéristique saisonnière.
+
+```{r pressure, echo=FALSE}
+data$observation_date <- as.Date(data$observation_date)
+plot(data$observation_date, data$UNRATE, type = "l", xlab = "Date", ylab = "Taux de chômage", main = "Évolution du taux de chômage")
+```
+
+### 3) Run the required filter to cut the seasonal pattern. 
+
+Grâce à la fonction de R "decompose" on décompose la série : une composante de tendance, une composante de saisonnalité et une composante aléatoire.
+
+On a pu identifier un trend (tendance qui suit le cours de la série temporelle originale) et la composante saisonnière qui correspond à des pics réguliers
+
+```{r cars1}
+ts_data <- ts(data$UNRATE, frequency = 12, start = c(1948, 1))
+decomposed <- decompose(ts_data, type = "additive")
+seasonally_adjusted <- ts_data / decomposed$seasonal
+#plot(data$observation_date, seasonally_adjusted, type = "l", xlab = "Date", ylab = "Seasonally Adjusted UNRATE", main = "Seasonally Adjusted UNRATE")
+decomposed <- decompose(ts_data)
+trend <- decomposed$trend
+seasonal <- decomposed$seasonal
+random <- decomposed$random
+```
+
+```{r pressure1, echo=FALSE}
+par(mfrow = c(2, 2))
+plot(ts_data, type = "l", xlab = "Date", ylab = "UNRATE", main = "Série Temporelle Originale")
+plot(trend, type = "l", xlab = "Date", ylab = "Tendance", main = "Composante de Tendance")
+plot(seasonal, type = "l", xlab = "Date", ylab = "Composante Saisonnière", main = "Composante Saisonnière")
+plot(random, type = "l", xlab = "Date", ylab = "Composante Aléatoire", main = "Composante Aléatoire")
+```
+
+Notre dernier modèle aléatoire peut donc être étudié correctement maintenant.
+
+### 4) Grab the filtered data and check using the right tool the seasonal pattern has been deleted.Is this filtered data be modeled using an ARMA(p,q) approach ?
+
+On peut utiliser ACF et le PACF afin de vérifier que la tendance saisonnière a été retirée correctement et que nous obtenons uniquement une série stationnaire.
+
+```{r cars2}
+library(forecast)
+deseason = seasadj(decomposed, "additive")
+```
+
+```{r pressure2, echo=FALSE}
+par(mfrow = c(2, 1))
+acf(deseason, lag.max = 36, main = "ACF of Random Component")
+pacf(deseason, lag.max = 36, main = "PACF of Random Component")
+```
+
+On remarque un ACF qui est légèrement décroissante et un PACF avec un pic puis des pics statistiquement différents de 0. Les deux schémas (ACF et PACF), nous laisse penser que la série obtenue est bien stationnaire et pour s'en assurer : nous pouvons faire un test de stationnarité type ADF.
+
+
+```{r cars3}
+
+library(tseries)
+adf_result <- adf.test(deseason)
+```
+
+```{r pressure3, echo=FALSE}
+cat("ADF resultat du test:\n")
+cat("ADF statistique:", adf_result$statistic, "\n")
+cat("p-value:", adf_result$p.value, "\n")
+cat("Hypothèse retenue:", adf_result$alternative, "\n")
+```
+
+Avec une valeur p de 0,01284252, inférieure au niveau de signification couramment utilisé de 0,05, nous pouvons rejeter l’hypothèse nulle de non-stationnarité. Par conséquent, sur la base du test ADF, il existe des preuves suggérant que la composante désaisonnalisée (désaison) est stationnaire.
+
+
+## Exercise 2 : Unit root tests
+
+### 1) Load "urca" package. Summarize the Dickey Fuller test. Compute the ADF using the right function on the filtered data
+
+
+```{r cars4}
+
+library(urca)
+```
+Le test DF est un test qui détermine si un processus a une racine unitaire. Autrement dit si le processus admet une racine unitaire alors celui-ci est non-stationnaire (H0 : hypothèse nulle), sinon le processus est stationnaire.
+
+Il s'agit d'une étape cruciale car nous ne pouvons travailler que sur les modèles stationnaires, d'où l'importance de vérifier la stationnarité et la bonne suppression de nos saisonnalités et trends.
+
+### 2) Compute the ADF test using the right function
+
+```{r cars5}
+adf = ur.df(diff(deseason), type="trend", selectlags = "Fixed")
+summary(adf)
+```
+La pvalue < 2.2e-16 < 0.05 on rejette donc l'hypothèse nulle (processus non stationnaire), donc la série obtenue est bien stationnaire
+
+Si on regarde la significativité de la trend : tstat > 1.96 on rejette l'hypothèse nulle.
+
+### 3) Determine then the integration degree of the data 
+
+Avec tout ça, on peut donc conclure que l'ordre d'intégration correspond à l'ordre 1 (un seul filtre en différence suffit pour rendre la série stationnaire)
+
+### 4) Compute the Phillips and Perron test on the filtered data. Does it confirm your previous result ?
+
+Le test de Phillips et Perron est similaire à celui de l'ADF, et vise à savoir si une série temporelle est stationnaire, c'est-à-dire si elle a ses propriétés statistiques, sa variance, son auto-corrélation et son espérance qui varient au cours du temps. L'hypothèse nulle H0: série non stationnaire (racine unitaire présente) contre H1 : série stationnaire
+
+```{r cars6}
+pp_result <- ur.pp(deseason)
+summary(pp_result)
+```
+
+La p-valeur est proche de 0, une fois de plus on rejette l'hypothèse nulle et on conclut que la time serie étudiée est bien stationnaire.
+Ainsi on peut affirmer que l'ordre d'intégration est d = 1 et ce qui confirme notre première impression avec le test ADF.
+
+### 5) Compute KPSS test
+Le KPSS inverse les deux hypothèses : H0 correspond à l'hypothèse de stationnarité et H1 la non stationnarité. 
+
+```{r cars7}
+UR = ur.kpss(diff(deseason))
+summary(UR)
+```
+La statistique de test supérieur à 5% donc on rejette H0 et on a donc la série temporelle qui est non stationnaire. 
+
+### 6) Find the degree of integration of the unemployement data
+
+On applique un filtre en différence de première ordre. 
+
+```{r cars8}
+diff = diff(deseason)
+URdiff = ur.kpss(diff)
+summary(URdiff)
+```
+
+On remarque que la statistique de test est ici inférieur à 5% grâce à notre filtre en différence.
+Il faut donc prendre un ordre d'integration égale à 1 ce qui confirme nos observations sur les tests précédents.
+
+
+## Exercise 3 : Modeling
+
+### 1) Propose the most relevant ARMA(p,q) framework
+
+Nous allons utiliser les crtières d'informations (AIC, BIC) afin de choisir notre p et q et obtenir un modèle précis.
+
+Fonction qui permet de calculer le coefficient AIC : 
+
+```{r cars9}
+armaloop = function(ts){
+  aics = numeric(0) 
+  k=1
+  for(p in 0:4){
+    for (q in 0:4){
+      arma = arima(ts,order=c(p,0,q), method ="ML")
+      aics[k] = AIC(arma)
+      k = k+1
+    }
+  }
+  names(aics)= c("(0,0)", "(0,1)","(0,2)","(0,3)","(0,4)","(1,0)","(1,1)","(1,2)","(1,3)","(1,4)","(2,0)","(2,1)","(2,2)","(2,3)","(2,4)","(3,0)","(3,1)","(3,2)","(3,3)","(3,4)","(4,0)","(4,1)","(4,2)","(4,3)","(4,4)")
+  return(aics)
+}
+```
+
+Fonction qui permet de calculer le coefficient BIC :
+
+```{r cars10}
+armaloop1 <- function(ts) {
+  bics <- numeric(0) 
+  k <- 1
+  for (p in 0:4) {
+    for (q in 0:4) {
+      arma <- arima(ts, order = c(p, 0, q), method = "ML")
+      bics[k] <- BIC(arma)
+      k <- k + 1
+    }
+  }
+  names(bics) <- c("(0,0)", "(0,1)", "(0,2)", "(0,3)", "(0,4)", "(1,0)", "(1,1)", "(1,2)", "(1,3)", "(1,4)", "(2,0)", "(2,1)", "(2,2)", "(2,3)", "(2,4)", "(3,0)", "(3,1)", "(3,2)", "(3,3)", "(3,4)", "(4,0)", "(4,1)", "(4,2)", "(4,3)", "(4,4)")
+  return(bics)
+}
+```
+On procède par balayage, c'est-à-dire nous posons un jeu de valeurs pour p et q (ici compris entre 0 et 4) et on calcule pour l'ensemble de combinaisons possibles les valeurs des critères d'infos. 
+On sélectionne finalement le couple (p,q) qui minimise les critères d'information. 
+
+```{r cars11}
+AIC <- suppressWarnings(armaloop(diff))
+minAIC <- min(AIC)
+print(minAIC)
+minindex <- which.min(AIC)
+mincoupleAIC <- names(AIC)[minindex]
+print(mincoupleAIC)
+
+```
+Il s'agit donc d'un ARMA(2,2). Donc on a p = 2 et q =2
+
+La généralisation d'un processus ARMA est un processus ARIMA avec I ou d qui correspond à un degré d'intégration de la série. D correspond au nombre de fois que l'on doit différencier la série pour la rendre stationnaire.
+
+```{r cars12}
+arma = suppressWarnings(arima(deseason, order=c(2,1,2), method ="ML"))
+residu = arma$residuals
+estimated = deseason-residu
+plot(deseason, col="blue", main="Valeurs estimées par ARMA(2,2) et les valeurs réellement observées")
+lines(estimated, col="green")
+```
+
+Graphiquement, le modèle ARMA(2,2) semble correspondre au modèle initial désaisonnalisé (en bleu).
+
+
+### 2) Justify the relevance of your choice and run the required quality check tests to validate your choice
+
+Nous pouvons réaliser un test de Ljung Box basé sur l'autocorrélation des résidus sur plusieurs retards.
+En effet, on examine si l'autocorrélatrion des résidus d'un modèle sont statistiquement significatif jusqu'à un certain lag
+Avec H0 : pas d'autocorrélation des erreurs d'ordre 1 et H1 : autocorrélation des erreurs d'ordre 1.
+
+L'objectif est de déterminer la qualité du modèle et donc on cherche à savoir si nos résidus sont des bruits blancs.
+
+```{r cars13}
+ljung_box_test <- Box.test(residu, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+Ici ma p-value > 0.05 donc on rejette pas H0 et donc on peut affirmer qu'il n'y a pas d'autocorrélation significative dans les résidus et donc 
+nos résidus se comportent comme des bruits blancs.
+
+```{r cars14}
+rmse <- sqrt(mean((residu)^2))
+print(rmse)
+```
+
+Nous obtenons un RMSE faible : l'objectif est d'avoir un modèle avec le plus faible RMSE.
+
+## Exercise 4 : Estimating an ARIMA(p,d,q)
+
+### Importation of data
+
+```{r pressure4, echo=FALSE, include = FALSE}
+library(tidyquant)
+```
+
+
+```{r cars15}
+#library(tiqyquant)
+library(ggplot2)
+library(quantmod)
+jnj = tq_get("JNJ", get ="stock.prices", from ="1997-01-01") %>% tq_transmute(mutate_fun=to.period, period="months")
+dataJNJ = ts(jnj$close, start =c(1997,1), frequency=12)
+head(dataJNJ)
+plot(dataJNJ, main = "JnJ stock prices")
+
+```
+
+### 1) Determine the degree of integration of the J&J stock prices
+
+Après avoir afficher le graphe de JnJ, on remarque qu'il n'y a pas vraiment de saisonnalité mais plusieurs tendances (au moins deux): une principale entre 2000 et 2015 et une seconde entre 2015 et 2022.
+On recherche donc le degré d'intégration, on peut donc faire un test de KPSS par rapport à un test de ADF et PP, il inverse les hypothèses de racines unitaires donc H0 c'est la stationnarité et H1 : non stationnarité
+ 
+```{r cars16}
+URdiff = ur.kpss(dataJNJ)
+summary(URdiff)
+```
+
+Ici on remarque notre statistique de test 4.88 > aux criticals values, donc on rejette H0 et on a que la série n'est pas stationnaire
+Nous refaisons maintenant un test de KPPS mais en appliquant à notre série, un filtre en différence de premier ordre.
+
+```{r cars17}
+diff = diff(dataJNJ)
+URdiff = ur.kpss(diff)
+summary(URdiff)
+```
+
+Maintenant on remarque que la statistique de test est inférieure aux criticals values, donc on ne rejette pas H0 et on peut affirmer que la série est stationnaire. Donc nous devons appliquer un filtre en différence de premier ordre afin de rendre la série stationnaire.
+
+
+
+### 2) Determine the order of the ARIMA model, ie values of p,d,q to be used to model the stock prices.
+
+Nous utilisons la fonction qui permet de calculer le crière d'information BIC que nous avons utilisée plus tôt pour les questions précédentes.
+
+```{r cars18}
+BIC <- suppressWarnings(armaloop1(diff))
+minBIC <- min(BIC)
+print(minBIC)
+minindex <- which.min(BIC)
+mincoupleBIC <- names(BIC)[minindex]
+print(mincoupleBIC)
+```
+
+Cela correspond au couple (0,2) pour le critère d'information BIC.
+
+Donc on cherche à modéliser un modèle ARIMA(0,1,2)
+
+```{r cars19}
+par(mfrow = c(2, 1))
+acf(diff)
+pacf(diff)
+```
+
+### 3) Estimate the corresponding ARIMA model to the values of p,d,q selected previously and plot
+
+```{r cars20}
+par(mfrow = c(1, 1))
+arima = arima(dataJNJ, order=c(0,1,2))
+residu = arima$residuals
+estimated = dataJNJ - residu
+plot(dataJNJ, col= "blue", main = "Modèle estimée en vert et modèle initial en bleu")
+lines(estimated, col ="green")
+```
+
+Le modèle estimé semble correspondre aux variations du modèle initial, le processus ARIMA(0,1,2) semble être adapté à la situation.
+
+
+### 4) Compute the residual of the model, as the difference entre Estimated(J&J) and J&J. Compute the required quality checks on the residuals.
+
+Nous pouvons réaliser un test de Ljung Box pour identifier l'autorcorrélation des résidus
+L'objectif est de voir si l'autocorrélatrion des résidus d'un modèle est statistiquement significatif jusqu'à un certain lag.
+Avec H0 : pas d'autocorrélation des erreurs d'ordre 1 et H1 : autocorrélation des erreurs d'ordre 1.
+
+Grâce à ce test, nous pouvons identifier la qualité de ce modèle !
+
+
+```{r cars21}
+ljung_box_test <- Box.test(residu, type = "Ljung-Box")
+print(ljung_box_test)
+```
+Ici ma p-value > 0.05 donc on rejette pas H0 et donc on peut affirmer qu'il n'y a pas d'autocorrélation significative dans les résidus et donc nos résidus se comportent comme des bruits blancs.
+
+```{r cars22}
+par(mfrow = c(1, 1))
+plot(residu, type = "l", col = "blue", main = "Residus de notre processus ARIMA(0,1,2)")
+```
+
+Nos résidus semblent correspondre à un bruit blanc (pas de saisonnalité).
+
+### 5) Use estimated coefficients, generate a forecast over the next 3 months. Calculate the confidence interval of the forecasted points
+
+```{r cars23}
+forecast_result <- forecast(arima, h = 3) #3 mois
+print(forecast_result$mean)
+plot(dataJNJ, col = "blue", main = "J&J prévision en rouge du cours du J&J", xlim = c(2023, 2025))
+lines(forecast_result$mean, col = "red")
+```
+
+```{r cars24}
+lower <- forecast_result$lower[, "95%"]
+upper <- forecast_result$upper[, "95%"]
+confidence_interval <- cbind(lower, upper)
+print(confidence_interval)
+```
+
+
+## Exercise 5 : Unit root test another one
+
+### 1) Explain the strategy of the test
+On sait que les tests de racines unitaire tels que ADF, DF ou encore PP sont souvent sources d'erreurs lors de potentielles ruptures.
+Ils risquent de ne pas rejeter l'hypothèse de la racine unitaire si les séries ont des breaks.
+Le test de Zivot Andrews permet justement de ne pas rencontrer ces problèmes là. L'hypothèse nulle (H0) de Zivot et Andrews est la présence d'une racine unitaire avec un break et l'hypothèse alternative selon laquelle la série est stationnaire avec une ou des ruptures. Il suffit de voir si la statistique de test est inférieur ou supérieur aux valeurs critiques.
+
+### 2) Generate 3 new random walks. The first a pure random walk, the second random walk with a break in level and the third a random walk with both a break in level and in the trend.
+
+```{r cars25}
+ set.seed(123)
+  time <- 1:100
+  Marchealea <- rnorm(100)
+  Marchealeabreak <- c(rnorm(50), rnorm(50, mean = 5))
+  Marchealeabreak[51:100] <- Marchealeabreak[51:100] + 10
+  Marchealeabreaktrend <- cumsum(c(rnorm(25), rnorm(25, mean = 5), rnorm(50, mean = 10)))
+  par(mfrow = c(3, 1))
+  plot(time, Marchealea, type = "l", col = "blue", main = "Marche aléatoire pure")
+  plot(time, Marchealeabreak, type = "l", col = "red", main = "Marche aléatoire avec un break rapide")
+  plot(time, Marchealeabreaktrend , type = "l", col = "green", main = "Marche aléatoire avec un break et une tendance ")
+  par(mfrow = c(1, 1))
+```
+
+### 3) Compute the appropriate   Zivot and Andrews test for the generated random walk
+
+Pur la marche aléatoire pure :
+
+```{r cars26}
+ library(urca)
+zivot_test <- ur.za(Marchealea)
+summary(zivot_test)
+```
+On a donc la p-value(0.1921) > 0.05 et Tstat (-10.4241) < critical value (-4.8) En regardant la p-valeur on se rends compte qu'il n'y a pas suffisament de preuve pour conclure sur l'existence d'une rupture dans la série. Ce qui correspond à la réalité car dans une marche aléatoire pure, il n'y a pas de break
+
+Pour la marche aléatoire avec un break rapide :
+
+```{r cars27}
+library(urca)
+zivot_test2 <- ur.za(Marchealeabreak)
+summary(zivot_test2)
+```
+
+On a ici la p-value < 0.05 donc il y a la présence d'une racine unitaire avec une structure de rupture , on ne rejette pas H0.
+Ce qui correspond à la réalité car nous avons généré une marche aléatoire avec un break rapide. On remarque qu'il y a bien identifié le berak à la position 50 comme nous pouvons le deviner sur le graphe affiché.
+
+Pour la marche aléatoire avec un break et une tendance :
+
+```{r cars28}
+library(urca)
+zivot_test3 <- ur.za(Marchealeabreaktrend, model = "trend") #on utilise trend car on suppose un changement structurel avec une tendance linéaire
+summary(zivot_test3)
+```
+Une fois de plus on a la p-value < 0.05 donc il y a la présence d'une racine unitaire (non stationnaire) avec une structure de rupture, on ne rejette pas H0. On a donc une rupture présente dans cette marche aléatoire, ce qui est cohérent car nous avons simulé une marche aléatoire avec un break et une tendance  On remarque que le test a bien identifié le berak à la position 19 comme nous pouvons le deviner sur le graphe affiché
+
+### 4) Relevant to use such test for the filtered unemployement rates. Compute the Zivot and Andrews unit root test.
+
+```{r cars29}
+library(readxl)
+data <- read_excel("C:/Users/natha/Desktop/unenployement.xls")
+plot(data$observation_date, data$UNRATE, type = "l", xlab = "Date", ylab = "Taux de chômage", main = "Évolution du taux de chômage")
+```
+
+Un break semble se dessiner au niveau de l'année 2020, du à la période du COVID-19 où beaucoup de gens ont perdus leurs emplois.
+Il peut donc être intéressant de réaliser un test de Zivot and Andrews afin de déterminer si il s'agit bien d'un break structurel identifié par ce test. 
+
+```{r cars30}
+library(urca)
+zivot_test4 <- ur.za(ts_data, model = "trend") #on utilise trend car on suppose un changement structurel avec une tendance linéaire
+summary(zivot_test4)
+```
+On remaque que la p-value est inférieur à 0.05 ce qui indique la présence d'une racine unitaire et une structure de rupture.
+Ce qui correspond à la réalité avec plusieurs breaks possible en 2009 et en 2020. Et donc nous avons confirmons de nos premières impressions.
+
+
+## Exercise 6 : Modeling the business cycle
+
+Propose the most appropriate specification to model the monthly credit spread dynamics in the US. The credit spread is the difference between the Baa index and the Aaa one.
+
+
+```{r cars31}
+install.packages("quantmod")
+library(quantmod)
+types <- c("AAA", "BAA");
+getSymbols(types, src = "FRED");
+spread <- ts(BAA-AAA, frequency =12);
+plot(spread, main = "spread crédit AAA et BAA", ylab ="Spread", xlab = "Année")
+```
+
+On remarque plusieurs trends mais aussi de potentielles saisonnalités, il s'agit donc d'une série non stationnaire, nous ne pouvons pas se servir de ce modèle. En effet, on remarque plusieurs oscillations qui semblent être répétitive mais aussi différents trends.
+Nous allons utiliser la fonction décompose de r pour trouver le trend et la saisonnalité.
+
+```{r cars32}
+decomposed <- decompose(spread, type = "additive")
+seasonally_adjusted <- spread / decomposed$seasonal
+
+plot(seasonally_adjusted, type = "l", xlab = "Date", ylab = "Seasonally Adjusted UNRATE", main = "Seasonally Adjusted UNRATE")
+decomposed <- decompose(spread)
+
+trend <- decomposed$trend
+seasonal <- decomposed$seasonal
+random <- decomposed$random
+```
+
+```{r cars33}
+par(mfrow = c(2, 2))
+plot(spread, type = "l", xlab = "Date", ylab = "UNRATE", main = "Série Temporelle Originale")
+plot(trend, type = "l", xlab = "Date", ylab = "Tendance", main = "Composante de Tendance")
+plot(seasonal, type = "l", xlab = "Date", ylab = "Composante Saisonnière", main = "Composante Saisonnière")
+plot(random, type = "l", xlab = "Date", ylab = "Composante Aléatoire", main = "Composante Aléatoire")
+```
+
+Avec la fonction decompose de R, nous avons pu retirer la composante de tendance et la composante saisonnière en vue d'obtenir la composante aléatoire. Nous allons maintenant déterminer si la composante aléatoire est bien stationnaire avec les tests de stationnarité.
+
+Test ADF :
+
+
+```{r pressure10, echo=FALSE, include = FALSE}
+library(forecast)
+install.packages("tseries")
+library(tseries)
+```
+
+```{r cars34}
+deseason = seasadj(decomposed, "additive")
+adf_result <- adf.test(deseason)
+cat("ADF Test Results:\n")
+cat("ADF Statistic:", adf_result$statistic, "\n")
+cat("p-value:", adf_result$p.value, "\n")
+```
+
+Avec une valeur p de 0,01, inférieure au niveau de signification couramment utilisé de 0,05, nous pouvons rejeter l’hypothèse nulle de non-stationnarité. Par conséquent, sur la base du test ADF, il existe des preuves suggérant que la composante désaisonnalisée est stationnaire.
+Donc nous obtenons puis une composante aléatoire stationnaire nous pouvons maintenant rechercher le modèle qui correspond bien à ce test !
+Nous allons trouver l'ordre d'intégration grâce au test KPSS
+Le KPSS avec H0 correspond à l'hypothèse de stationnarité et H1 la non stationnarité. 
+
+```{r cars35}
+UR = ur.kpss(deseason)
+summary(UR)
+```
+
+La statistique de test supérieure à la critical value de 5% donc on rejette H0 et on donc la série temporelle est non stationnaire
+On applique un filtre en différence de première ordre.
+
+```{r cars36}
+diff = diff(deseason)
+URdiff = ur.kpss(diff)
+summary(URdiff)
+```
+Après avoir appliquer notre filtre en différence d'ordre 1, on remarque que la série temporelle est bien stationnaire selon le test de KPSS
+Ainsi nous avons pu déterminer l'ordre d'intégration, d = 1. Nous allons afficher les schémas de ACF et PACF afin d'avoir une première idée du type du processus que nous rencontrons ici :
+
+```{r cars37}
+library(forecast)
+deseason = seasadj(decomposed, "additive")
+par(mfrow = c(2, 1))
+acf(deseason, lag.max = 36, main = "ACF de la composante aléatoire")
+pacf(deseason, lag.max = 36, main = "PACF de la composante aléatoire")
+```
+
+Maintenant nous allons calculer les coefficients AIC et BIC pour trouver le type de processus ARIMA et essayer de choisir le couple (p,q) qui minimise les critères d'informations :
+
+```{r cars38}
+AIC <- suppressWarnings(armaloop(diff))
+min_AIC <- min(AIC)
+min_index <- which.min(AIC)
+min_coupleAIC <- names(AIC)[min_index]
+print(min_coupleAIC)
+
+BIC =suppressWarnings(armaloop1(diff))
+min(BIC)
+min_index <- which.min(BIC)
+min_coupleBIC <- names(BIC)[min_index]
+print(min_coupleBIC)
+
+```
+
+Les deux critères d'informations (AIC et BIC) me donnent bien un ARIMA ayant pour valeur p = 4 et q = 3. Donc nous allons maintenant comparer notre modèle ARIMA(4,1,3) et celui initial.
+
+```{r cars39}
+arima = arima(deseason, order=c(4,1,3), method ="ML")
+residu = arima$residuals
+estimated = deseason-residu
+plot(deseason, col="blue", main="Valeurs estimées par ARIMA(4,1,3) et les valeurs réellement observées")
+lines(estimated, col="green")
+```
+
+Le modèle ARIMA(4,1,3) semble correspondre suffisamment bien pour s'en assurer nous allons procéder à un test d'autocorrélation sur les résidus.
+Pour cela, nous utilions donc le test de Ljung Box.
+
+```{r cars40}
+ljung_box_test <- Box.test(residu, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+La p-value (0.9119) > 0.05 donc on ne rejette pas H0 au seuil de 95%, et on peut donc affirmer qu'il n'y a pas d'autocorrélation significative dans les résidus.
+
+```{r cars41}
+par(mfrow = c(1, 1))
+plot(residu, type = "l", col = "blue", main = "Residus de notre processus ARIMA(4,1,3)")
+```
+
+Nos résidus agissent donc comme des bruits blancs.
+
+Prévisions pour les 3 prochains mois
+
+```{r cars42}
+forecast_result <- forecast(arima, h = 3)#3 mois
+print(forecast_result$mean)
+```
+
+Les prochaines prévisions sont de 0.994 pour ce mois de décembre, 0.999 pour le mois de janvier 2024 et 1.010 pour le mois de février 2024
+
+Calcul des intervalles de confiance pour nos prévisions sur les trois prochains mois :
+
+```{r cars43}
+lower <- forecast_result$lower[, "95%"]
+upper <- forecast_result$upper[, "95%"]
+confidence_interval <- cbind(lower, upper)
+print(confidence_interval)
+
+```
+En conclusion, nous avons pu trouver un modèle ARIMA correspondant bien à nos données et après s'être assuré de la bonne qualité de notre modèle, nous avons pu réaliser des estimations.
+
+### Conclusion du TD : Ce TD m'a permis d'acquérir des connaisances sur les différents test d'autocorrélation et de stationnarité. J'ai pu comprendre les différentes étapes dans la mise en place de prévisions sur des données et entreprendre les différents tests en adéquation.
